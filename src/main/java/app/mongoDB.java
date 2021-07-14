@@ -1,0 +1,90 @@
+package app;
+
+import com.google.common.collect.Iterators;
+import com.mongodb.spark.MongoSpark;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.PairFunction;
+import org.apache.spark.api.java.function.VoidFunction;
+import org.apache.spark.sql.SparkSession;
+import org.bson.Document;
+import scala.Tuple2;
+
+import java.util.Iterator;
+
+public class mongoDB {
+    public static void main(String[] args) {
+        System.setProperty("hadoop.home.dir", "C:\\winutils");
+        SparkSession spark= SparkSession.builder()
+                .master("local")
+                .appName("MongoSpark")
+                .config("spark.mongodb.input.uri","mongodb://127.0.0.1/test.WordCupCollection")
+                .config("spark.mongodb.output.uri","mongodb://127.0.0.1/test.WordCupCollection")
+                .getOrCreate();
+        JavaSparkContext sc=new JavaSparkContext(spark.sparkContext());
+
+        JavaRDD<String> Raw_Data = sc.textFile("C:\\Users\\talhaklc\\Desktop\\WorldCup\\WorldCupPlayers.csv");
+
+        JavaRDD<PlayersModel> playersRDD = Raw_Data.map(new Function<String, PlayersModel>() {
+            public PlayersModel call(String line) throws Exception {
+                String[] dizi = line.split(",",-1);
+                return new PlayersModel(dizi[0], dizi[1]
+                        , dizi[2], dizi[3], dizi[4], dizi[5], dizi[6], dizi[7], dizi[8]);
+            }
+        });
+        JavaRDD<PlayersModel> tur = playersRDD.filter(new Function<PlayersModel, Boolean>() {
+            public Boolean call(PlayersModel playersModel) throws Exception {
+                return playersModel.getTeam().equals("TUR");
+            }
+        });
+
+
+/*
+        //MESSI DUNYA KUPASINDA KAÇ MAÇ YAPTI ?
+        JavaRDD<PlayersModel> messiRDD = playersRDD.filter(new Function<PlayersModel, Boolean>() {
+            public Boolean call(PlayersModel playersModel) throws Exception {
+                return playersModel.getPlayerName().equals("MESSI");
+            }
+        });
+        System.out.println(" Messi dünya kupalarında " + messiRDD.count()+" maç yaptı");
+*/
+//   Futbolcunun adı 35
+        JavaPairRDD<String, String> mapRDD = tur.mapToPair(new PairFunction<PlayersModel, String, String>() {
+            public Tuple2<String, String> call(PlayersModel playersModel) throws Exception {
+                return new Tuple2<String, String>(playersModel.getPlayerName(), playersModel.getMatchID());
+            }
+        });
+
+        JavaPairRDD<String, Iterable<String>> groupPlayer = mapRDD.groupByKey();
+
+        JavaRDD<groupPlayer> resultRDD = groupPlayer.map(new Function<Tuple2<String, Iterable<String>>, groupPlayer>() {
+            public groupPlayer call(Tuple2<String, Iterable<String>> dizi) throws Exception {
+                Iterator<String> iteratorraw = dizi._2().iterator();
+                int size = Iterators.size(iteratorraw);
+                return new groupPlayer(dizi._1, size);
+            }
+        });
+
+        JavaRDD<Document> MongoRDD = resultRDD.map(new Function<groupPlayer, Document>() {//RDD document tipinde olustu.
+            public Document call(groupPlayer groupPlayer) throws Exception {
+                /* json verisi key ve value ciftlerinden olusur.
+        {
+         PlayerName : 'RUSTU',
+         MatchCount : 6
+        }
+        asagidaki returnde bunun aynisini yazdirmaya calistim.
+         */
+                return Document.parse("{PlayerName: " + " ' " + groupPlayer.getPlayerName() + "'"
+                        + ","+"PlayerMatchCount: "+ groupPlayer.getMatchCount()
+                        +"}");
+
+                //rustunun string olamsi gerekiyor rustu getplayer namede var ama tirnaklar yok onun icin tirnaklari kendimiz koyduk.
+            }
+        });
+
+        MongoSpark.save(MongoRDD); //MongoRDD yi kaydet.
+
+    }
+}
